@@ -21,6 +21,15 @@
       top: 0;
       left: 0;
       z-index: 1;
+      cursor: default;
+    }
+    
+    .grab-cursor {
+      cursor: grab;
+    }
+    
+    .grabbing-cursor {
+      cursor: grabbing;
     }
     
     .controls {
@@ -65,7 +74,7 @@
   </div>
   
   <div class="info">
-    <p>Click anywhere on the water to place a floating lantern</p>
+    <p>Click anywhere on the water to place a floating lantern, or drag existing lanterns and drop them</p>
   </div>
 
   <script>
@@ -83,12 +92,14 @@
     const colors = ['#FF9AA2', '#FFB7B2', '#FFDAC1', '#E2F0CB', '#B5EAD7', '#C7CEEA'];
     const ripples = [];
     
+    // Dragging state
+    let isDragging = false;
+    let draggedLantern = null;
+    let dragOffsetY = 0;
+    
     // Water properties
     const waterLevel = canvas.height * 0.6;
     let waterOffset = 0;
-    
-    // Music
-    let ambientSound;
     
     // Game objects
     class Lantern {
@@ -104,17 +115,42 @@
         this.glowIntensity = 0.7 + Math.random() * 0.3;
         this.glowSpeed = 0.03 + Math.random() * 0.02;
         this.glowPhase = Math.random() * Math.PI * 2;
+        this.isDragged = false;
+        this.dropSpeed = 0;
+        this.isDropping = false;
       }
       
       update() {
         if (paused) return;
         
-        this.x += this.speedX;
-        if (this.x < -this.size) this.x = canvas.width + this.size;
-        if (this.x > canvas.width + this.size) this.x = -this.size;
-        
-        // Bobbing on water
-        this.y = waterLevel + Math.sin(Date.now() * this.bobSpeed + this.bobOffset) * this.bobAmount;
+        if (this.isDragged) {
+          // When dragged, lantern follows cursor with offset
+          // No need to update position here as it's handled by mousemove
+          
+          // Update glow animation while dragging
+          this.glowPhase += this.glowSpeed * 1.5; // Faster glow when dragged
+        } else if (this.isDropping) {
+          // Lantern is falling back to water
+          this.y += this.dropSpeed;
+          this.dropSpeed += 0.2; // Accelerate fall
+          
+          // Check if lantern has hit water
+          if (this.y >= waterLevel) {
+            this.y = waterLevel;
+            this.isDropping = false;
+            // Create splash ripples when lantern hits water
+            ripples.push(new Ripple(this.x, waterLevel, 1.5));
+            ripples.push(new Ripple(this.x, waterLevel, 1.2));
+          }
+        } else {
+          // Normal floating behavior
+          this.x += this.speedX;
+          if (this.x < -this.size) this.x = canvas.width + this.size;
+          if (this.x > canvas.width + this.size) this.x = -this.size;
+          
+          // Bobbing on water
+          this.y = waterLevel + Math.sin(Date.now() * this.bobSpeed + this.bobOffset) * this.bobAmount;
+        }
         
         // Update glow
         this.glowPhase += this.glowSpeed;
@@ -148,14 +184,40 @@
         ctx.lineWidth = 1;
         ctx.stroke();
       }
+      
+      isPointInside(x, y) {
+        const dx = this.x - x;
+        const dy = (this.y - this.size/2) - y;
+        return (dx * dx + dy * dy) <= Math.pow(this.size/2, 2);
+      }
+      
+      startDrag(mouseY) {
+        this.isDragged = true;
+        dragOffsetY = this.y - mouseY;
+      }
+      
+      stopDrag() {
+        this.isDragged = false;
+        // Start dropping if above water level
+        if (this.y < waterLevel) {
+          this.isDropping = true;
+          this.dropSpeed = 1;
+        }
+      }
+      
+      setPosition(x, y) {
+        this.x = x;
+        // Limit how high the lantern can be dragged (keep string visible)
+        this.y = Math.max(y + dragOffsetY, this.size);
+      }
     }
     
     class Ripple {
-      constructor(x, y) {
+      constructor(x, y, sizeMultiplier = 1) {
         this.x = x;
         this.y = y;
         this.size = 1;
-        this.maxSize = 50 + Math.random() * 30;
+        this.maxSize = (50 + Math.random() * 30) * sizeMultiplier;
         this.speed = 1 + Math.random() * 0.5;
         this.opacity = 0.5;
       }
@@ -212,30 +274,30 @@
       }
     }
     
-function drawSky() {
-  // Draw moon
-  const moonX = canvas.width * 0.8;
-  const moonY = canvas.height * 0.2;
-  const moonSize = 40;
+    function drawSky() {
+      // Draw moon
+      const moonX = canvas.width * 0.8;
+      const moonY = canvas.height * 0.2;
+      const moonSize = 40;
 
-  const gradient = ctx.createRadialGradient(
-    moonX, moonY, moonSize * 0.2,
-    moonX, moonY, moonSize * 1.5
-  );
-  gradient.addColorStop(0, 'rgba(255, 255, 220, 1)');
-  gradient.addColorStop(0.5, 'rgba(255, 255, 220, 0.3)');
-  gradient.addColorStop(1, 'rgba(255, 255, 220, 0)');
+      const gradient = ctx.createRadialGradient(
+        moonX, moonY, moonSize * 0.2,
+        moonX, moonY, moonSize * 1.5
+      );
+      gradient.addColorStop(0, 'rgba(255, 255, 220, 1)');
+      gradient.addColorStop(0.5, 'rgba(255, 255, 220, 0.3)');
+      gradient.addColorStop(1, 'rgba(255, 255, 220, 0)');
 
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.arc(moonX, moonY, moonSize * 1.5, 0, Math.PI * 2);
-  ctx.fill();
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(moonX, moonY, moonSize * 1.5, 0, Math.PI * 2);
+      ctx.fill();
 
-  ctx.fillStyle = 'rgba(255, 255, 220, 0.9)';
-  ctx.beginPath();
-  ctx.arc(moonX, moonY, moonSize, 0, Math.PI * 2);
-  ctx.fill();
-}
+      ctx.fillStyle = 'rgba(255, 255, 220, 0.9)';
+      ctx.beginPath();
+      ctx.arc(moonX, moonY, moonSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     function addLantern(x = null) {
       const lanternX = x || Math.random() * canvas.width;
@@ -273,6 +335,36 @@ function drawSky() {
       requestAnimationFrame(updateGame);
     }
     
+    function getLanternUnderCursor(x, y) {
+      // Check in reverse order (top-most lantern first)
+      for (let i = lanterns.length - 1; i >= 0; i--) {
+        if (lanterns[i].isPointInside(x, y)) {
+          return lanterns[i];
+        }
+      }
+      return null;
+    }
+    
+    function updateCursor() {
+      if (isDragging) {
+        canvas.classList.remove('grab-cursor');
+        canvas.classList.add('grabbing-cursor');
+      } else {
+        canvas.classList.remove('grabbing-cursor');
+        
+        // Check if cursor is over a lantern
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = event.clientX - rect.left;
+        const mouseY = event.clientY - rect.top;
+        
+        if (getLanternUnderCursor(mouseX, mouseY)) {
+          canvas.classList.add('grab-cursor');
+        } else {
+          canvas.classList.remove('grab-cursor');
+        }
+      }
+    }
+    
     // Event listeners
     window.addEventListener('resize', () => {
       canvas.width = window.innerWidth;
@@ -280,9 +372,76 @@ function drawSky() {
       waterLevel = canvas.height * 0.6;
     });
     
-    canvas.addEventListener('click', (e) => {
-      if (e.clientY > waterLevel - 50 && e.clientY < canvas.height) {
-        addLantern(e.clientX);
+    canvas.addEventListener('mousedown', (event) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
+      
+      // Check if clicking on a lantern
+      const lantern = getLanternUnderCursor(mouseX, mouseY);
+      if (lantern) {
+        draggedLantern = lantern;
+        draggedLantern.startDrag(mouseY);
+        isDragging = true;
+        
+        // Create small ripple when picking up a lantern
+        if (lantern.y >= waterLevel - 10) {
+          ripples.push(new Ripple(lantern.x, waterLevel, 0.7));
+        }
+      } else if (mouseY > waterLevel - 50 && mouseY < canvas.height) {
+        // Place new lantern on water if not clicking on existing one
+        addLantern(mouseX);
+      }
+      
+      updateCursor();
+    });
+    
+    canvas.addEventListener('mousemove', (event) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
+      
+      if (isDragging && draggedLantern) {
+        draggedLantern.setPosition(mouseX, mouseY);
+      }
+      
+      updateCursor();
+    });
+    
+    canvas.addEventListener('mouseup', () => {
+      if (isDragging && draggedLantern) {
+        draggedLantern.stopDrag();
+        draggedLantern = null;
+        isDragging = false;
+      }
+      
+      updateCursor();
+    });
+    
+    canvas.addEventListener('mouseleave', () => {
+      if (isDragging && draggedLantern) {
+        draggedLantern.stopDrag();
+        draggedLantern = null;
+        isDragging = false;
+      }
+      
+      canvas.classList.remove('grab-cursor');
+      canvas.classList.remove('grabbing-cursor');
+    });
+    
+    canvas.addEventListener('mousemove', (event) => {
+      if (!isDragging) {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = event.clientX - rect.left;
+        const mouseY = event.clientY - rect.top;
+        
+        // Change cursor style when hovering over lanterns
+        const lantern = getLanternUnderCursor(mouseX, mouseY);
+        if (lantern) {
+          canvas.classList.add('grab-cursor');
+        } else {
+          canvas.classList.remove('grab-cursor');
+        }
       }
     });
     
